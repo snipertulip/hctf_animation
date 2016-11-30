@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title></title>
+	<style type="text/css">
+	html,
+	body {
+		margin: 0;
+		padding: 0;
+		background-color: #000;
+	}
+	
+	#three_canvas {
+		position: absolute;
+		width: 100%;
+		height: 100%;
+	}
+	/*
+		Progress Bar Start
+	*/
+	
+	.progress {
+		width: 200px;
+		height: 20px;
+		background: #blue;
+		border: 2px solid blue;
+		position: fixed;
+		margin: auto;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+	}
+	
+	.progress > .progressBar {
+		width: 0;
+		height: 20px;
+		background: blue;
+		border: none;
+	}
+	
+	.progress > .percent {
+		width: 200px;
+		height: 20px;
+		position: absolute;
+		top: 0;
+		text-align: center;
+		color: yellow;
+	}
+	/*
+	Progress Bar End
+	*/
+	</style>
+	<script src="js/jquery-2.2.4.js"></script>
+	<script src="js/Queue.js"></script>
+	<script src="js/three.min.js"></script>
+	<script src="js/tween.js"></script>
+	<script src='js/threex.laserbeam.js'></script>
+	<script src='js/threex.lasercooked.js'></script>
+	<script src='js/threex.dynamictexture.js'></script>
+	<script src="js/ColladaLoader2.js"></script>
+	<script src="js/iniObject.js"></script>
+	<script>
+	</script>
+</head>
+
+<body>
+	<canvas id="three_canvas"></canvas>
+	<div class="progress">
+		<div class="progressBar"></div>
+		<div class="percent">0%</div>
+	</div>
+	<script>
+	var XctfDemo = XctfDemo || function() {
+		//global variable:
+		var gRenderer, gCamera, gScene, gUniverse, gLight, gControls, gWidth, gHeight;
+		var cameraInitRot = new THREE.Euler();
+		var gIsReady = false,
+			gIsReadyInterval, gCallbacks;
+
+		//simulation data:
+		var gWarcraft = [];
+		var gExamination = [];
+
+		//laser variate:
+		var gLaserBeam, gOnRenderFcts = [],
+			gLaserCooked = [];
+
+		var gParticleSystems = [];
+
+		var centerVec = new THREE.Vector3(0, 0, 1);
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		//initialize loader: 
+		var gLoadManager;
+		(function() {
+			gLoadManager = new THREE.LoadingManager();
+			gLoadManager.onProgress = function(item, loaded, total) {
+				$('.progressBar').css('width', (loaded / total * 100) + '%');
+				$('.percent').html((loaded / total * 100) + '%');
+				//console.log((loaded / total * 100) + '%');
+			};
+			gLoadManager.onLoad = function() {
+				//Initialize Program
+				$('.progress').hide();
+				gIsReady = true;
+			};
+			gLoadManager.onError = function() {
+				console.log('there has been an error');
+			};
+		})();
+
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		/*Warcraft*/
+		(function() {
+			var Warcraft = Warcraft || function(opt) {
+				var _model, _index = Warcraft.Queue.length; // 队列位置、累加器（旋转间隔用）			
+				var _sn = 0; //编号
+				var _logo;
+				var _teamName = new THREEx.DynamicTexture(512, 256);
+				var _teamBox;
+				var _fontWidth = 500,
+					_fontHeight = 256;
+				var _bullet = new Bullet();
+				this._patrolQueue = new Queue();
+				_queueMS = 250; //	The attack time: 2 seconds.
+				_rotMS = 300; //	The attack time: 2 seconds.
+
+				//Don't adjust the direction while shooting.
+				this.shooting = false;
+				this.patrolling = false;
+
+				this.ini = function(opt) {
+					_model = Warcraft.MODEL.clone();
+					Warcraft.Queue.push(this);
+					this.iniFont();
+					gScene.add(_model);
+				}
+
+				this.getSelf = function() {
+					return _model;
+				}
+
+				this.getSn = function() {
+					return _sn;
+				}
+
+				this.getBullet = function() {
+					return _bullet;
+				}
+
+				this.setSn = function(val) {
+					return _sn = val;
+				}
+
+				this.iniFont = function() {
+					_teamName.context.font = "bolder 60px Verdana";
+					_teamName.texture.anisotropy = gRenderer.getMaxAnisotropy();
+					var geometry = new THREE.BoxGeometry(_fontWidth, _fontHeight, 0.1);
+					var material = new THREE.MeshBasicMaterial({
+						map: _teamName.texture,
+						transparent: true,
+						//opacity: 0.5
+					});
+					_teamBox = new THREE.Mesh(geometry, material);
+					/*
+					var geometry = new THREE.CubeGeometry(500, 500, 500);
+					var material = new THREE.MeshBasicMaterial({
+						map: _teamName.texture
+					})
+					*/
+					gScene.add(_teamBox);
+
+					_teamName.texture.needsUpdate = true;
+				}
+
+				/*
+				direction: 顺clockwise -1, 逆anticlockwise 1
+				 */
+				this.whirl = function(direction, speed, radius) {
+
+
+					//var timer = Date.now() * speed;
+					//var angle = direction * timer + _index * 2 * Math.PI / Warcraft.Queue.length;
+					//度
+					var timer = (Date.now() / 1000) % 60 * 6;
+					timer *= speed;
+					//弧度
+					var angle = (timer) * Math.PI / 180;
+					//方向
+					angle = direction * angle;
+					//排队
+					angle += _index * 2 * Math.PI / Warcraft.Queue.length;
+
+					_model.position.x = Math.cos(angle) * radius;
+					_model.position.z = Math.sin(angle) * radius;
+					//_model.rotation.y=  angle -  Math.PI / 2; //飞机调头
+					//_model.rotation.y = (timer) * Math.PI / 180 + direction * _index * 2 * Math.PI  / Warcraft.Queue.length; //飞机调头
+
+					//if(!this.shooting)_model.rotation.y = -angle;
+
+
+					if (!this.shooting && !this._patrolQueue.isEmpty()) {
+						var ___pQ = this._patrolQueue.peek();
+						if (___pQ) {
+
+							_teamName.clear();
+							_teamName.drawText(___pQ.teamName, 0, 60, 'white');
+							_teamName.drawText('得分: ' + ___pQ.score, 0, 120, 'white');
+							_teamName.drawText('排行: ' + ___pQ.ranking, 0, 180, 'white');
+
+							/*_teamName.drawTextCooked({
+								text: 'Hello World, super wow',
+								lineHeight: 0.2,
+							})
+*/
+
+							var startPos = this.getSelf().position;
+							var endPos = Examination.GetSelfObjBySn(___pQ.targetSn).getSelf().position;
+
+							var dx = endPos.x - startPos.x;
+							var dz = endPos.z - startPos.z;
+							var d = Math.sqrt(dx * dx + dz * dz);
+
+							var targetVec = new THREE.Vector3(dx, 0, dz); //指向目标的方向向量
+
+							var rot = centerVec.angleTo(targetVec);
+
+							rot = dx > 0 ? rot : -rot; //修正旋转角度
+
+							//rot = rot + Math.floor(_model.rotation.y / (2 * Math.PI));
+
+							if (!this.patrolling) {
+								this.patrolling = true;
+
+								//.to(null, 1000 * Math.random())
+
+
+								new TWEEN.Tween().to(null, 1000 * Math.random()).onComplete(function() {
+
+									new TWEEN.Tween(_model.rotation).to({
+										y: rot
+									}, _rotMS).onComplete(function() {
+										this.patrolling = false;
+
+										//Examination.GetSelfObjBySn(___pQ.targetSn).getProtegos().visible = true;
+										Examination.GetSelfObjBySn(___pQ.targetSn).getProtegos().material.opacity = 0.2;
+										this.patrol();
+
+									}.bind(this)).start();
+								}.bind(this)).start();
+
+							}
+						}
+					}
+
+
+					//logo
+					//_logo.position.copy(_model.position).add(GLOBALOPTION.WarcraftOption.logoOffset);
+					//_logo.rotation.copy(gCamera.rotation);
+					_teamBox.position.copy(_model.position).add(GLOBALOPTION.WarcraftOption.logoOffset);
+					_teamBox.rotation.copy(gCamera.rotation);
+
+
+				}
+
+				this.patrol = function() {
+
+					/*					__attacker._patrolQueue.enqueue({
+											attackSn : AttackData.rows[countsWarcraft].teamId,
+											targetSn: AttackData.rows[countsWarcraft].id,
+											status: AttackData.rows[countsWarcraft].solved
+										});
+					*/
+					//未射击时，根据队列，判断是否射击
+					if (!this.shooting && !this._patrolQueue.isEmpty()) {
+						var ___pQ = this._patrolQueue.peek();
+
+						_bullet.attack(this._patrolQueue.dequeue());
+
+						//						_bullet.show();
+
+						//_bullet.getSelf().position.copy(this.getSelf().position);
+						//_bullet.getSelf().rotation.y = this.getSelf().rotation.y - Math.PI / 2;
+
+
+						//_bullet.getSelf().position.copy(_model.position);
+
+						//计时射击
+						var thatObj = this;
+
+						this.shooting = true;
+
+						return (
+							function() {
+								//new TWEEN.Tween().delay(_queueMS).onComplete(function() {
+								new TWEEN.Tween().to(null, _queueMS).onComplete(function() {
+									_bullet.hide();
+									thatObj.shooting = false;
+									//Examination.GetSelfObjBySn(___pQ.targetSn).getProtegos().visible = false;
+									Examination.GetSelfObjBySn(___pQ.targetSn).getProtegos().material.opacity = 0.001;
+								}).start();
+							}()
+						)
+					}
+
+				}
+
+				this.delay = function() {
+					/*var _W = 
+					return()*/
+				}
+
+				this.loadLogo = function(pUrl) {
+
+					var logoTexture = THREE.ImageUtils.loadTexture(pUrl);
+					var logoWidth = 0,
+						logoHeight = 0;
+
+					if (GLOBALOPTION.WarcraftOption.LogoSize.width > GLOBALOPTION.WarcraftOption.LogoSize.height) {
+						logoWidth = 320;
+						logoHeight = 320 * GLOBALOPTION.WarcraftOption.LogoSize.height / GLOBALOPTION.WarcraftOption.LogoSize.width;
+					} else {
+						logoHeight = 320;
+						logoWidth = 320 * GLOBALOPTION.WarcraftOption.LogoSize.height / GLOBALOPTION.WarcraftOption.LogoSize.width;
+					}
+
+					var logoGeo = new THREE.BoxGeometry(logoWidth, logoHeight, 0.1);
+					var logoMat = new THREE.MeshBasicMaterial({
+						map: logoTexture
+					});
+					logoMat.transparent = true;
+					logoMat.opacity = 0.7;
+					_logo = new THREE.Mesh(logoGeo, logoMat);
+
+					Warcraft.LogoQueue.push(_logo);
+
+					gScene.add(_logo);
+
+
+				}
+
+				this.ini();
+			};
+
+			Warcraft.GetSelfObjBySn = function(sn) {
+				var counts = Warcraft.Queue.length;
+				while (counts > 0) {
+					--counts;
+					if (Warcraft.Queue[counts].getSn() == sn) {
+						return (Warcraft.Queue[counts]);
+					}
+				}
+			}
+
+
+			Warcraft.LOADMODEL = function() {
+				var loader = new THREE.ColladaLoader(gLoadManager);
+				loader.load('models/center.dae', function(collada) {
+					collada = collada.scene;
+					collada.scale.set(0.15, 0.1, 0.1);
+					collada.scale.set(25, 25, 25);
+					collada.rotation.set(0, 0, 0);
+
+					Warcraft.MODEL = collada;
+				});
+			}
+
+			Warcraft.MODEL = Warcraft.MODEL || Warcraft.LOADMODEL();
+
+			Warcraft.Queue = [];
+			Warcraft.LogoQueue = [];
+
+			this.Warcraft = Warcraft;
+
+		})();
+
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		/*Examination*/
+		(function() {
+			var Examination = Examination || function(opt) {
+				var _model, _index = Examination.Queue.length // 队列位置、累加器（旋转间隔用）	
+				;
+				var _sn = 0; //编号
+				var _name;
+
+				var _protegos = null;
+
+				var _examName = new THREEx.DynamicTexture(512, 256);
+				var _examBox;
+				var _fontWidth = 500,
+					_fontHeight = 256;
+
+				this.ini = function(opt) {
+					_model = Examination.MODEL.clone();
+					Examination.Queue.push(this);
+					gScene.add(_model);
+
+					//protegos 防护罩
+					var geometry = new THREE.SphereGeometry(140, 32, 32);
+					var material = new THREE.MeshBasicMaterial({
+						transparent: true,
+						//side	: THREE.BackSide,
+						opacity: 0.001
+					});
+					_protegos = new THREE.Mesh(geometry, material);
+					gScene.add(_protegos);
+					this.iniFont();
+				}
+
+				this.getSelf = function() {
+					return _model;
+				}
+
+				this.getSn = function() {
+					return _sn;
+				}
+
+				this.getProtegos = function() {
+					return _protegos;
+				}
+
+				this.getName = function() {
+					return name;
+				}
+
+				this.setName = function(name) {
+					_name = name;
+				}
+
+				this.setSn = function(val) {
+					return _sn = val;
+				}
+
+				this.iniFont = function() {
+						_examName.context.font = "bolder 60px Verdana";
+						_examName.texture.anisotropy = gRenderer.getMaxAnisotropy();
+						var geometry = new THREE.BoxGeometry(_fontWidth, _fontHeight, 0.1);
+						var material = new THREE.MeshBasicMaterial({
+							map: _examName.texture,
+							transparent: true,
+							//opacity: 0.5
+						});
+						_examBox = new THREE.Mesh(geometry, material);
+						/*
+						var geometry = new THREE.CubeGeometry(500, 500, 500);
+						var material = new THREE.MeshBasicMaterial({
+							map: _examName.texture
+						})
+						*/
+						gScene.add(_examBox);
+
+						_examName.texture.needsUpdate = true;
+					}
+					/*
+					direction: 顺clockwise -1, 逆anticlockwise 1
+					 */
+				this.whirl = function(direction, speed, radius) {
+					_examName.clear();
+					_examName.drawText(_name, 0, 60, 'white');
+
+
+					_examBox.position.copy(_model.position).add(GLOBALOPTION.WarcraftOption.logoOffset);
+					_examBox.rotation.copy(gCamera.rotation);
+
+					var timer = (Date.now() / 1000) % 60 * 6;
+					timer *= speed;
+					var angle = (timer) * Math.PI / 180;
+					angle = direction * angle;
+					angle += _index * 2 * Math.PI / Examination.Queue.length;
+
+					_model.position.x = Math.cos(angle) * radius;
+					_model.position.z = Math.sin(angle) * radius;
+					_model.rotation.y = -angle + Math.PI;
+
+					_protegos.position.copy(_model.position);
+				}
+
+				this.ini();
+			};
+
+			Examination.GetSelfObjBySn = function(sn) {
+				var counts = Examination.Queue.length;
+				while (counts > 0) {
+					--counts;
+					if (Examination.Queue[counts].getSn() == sn) {
+						return (Examination.Queue[counts]);
+					}
+				}
+			}
+
+			Examination.LOADMODEL = function() {
+				var loader = new THREE.ColladaLoader(gLoadManager);
+				loader.load('models/service.dae', function(collada) {
+					collada = collada.scene;
+					collada.scale.set(0.1, 0.1, 0.1);
+					collada.rotation.set(0, 0, 0);
+
+					Examination.MODEL = collada;
+				});
+
+			}
+
+			Examination.MODEL = Examination.MODEL || Examination.LOADMODEL();
+
+			Examination.Queue = [];
+
+			this.Examination = Examination;
+
+		})();
+
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		/*Bullet*/
+		(function() {
+			var Bullet = Bullet || function() {
+				var _model, _index;
+				//laser
+				var _laserBeam;
+				var _counts = 0;
+				this.laserCooked;
+				this.patrolQueue;
+
+				this.ini = function(opt) {
+					//_model = Bullet.MODEL.clone();
+					this.addNewModel();
+					gScene.add(_model);
+				}
+
+				this.getSelf = function() {
+					return _model;
+				}
+
+				this.show = function() {
+					_model.visible = true;
+
+				}
+
+				this.hide = function() {
+					_model.visible = false;
+				}
+
+				this.reset = function() {
+					_model.position.x = 0;
+					_model.position.y = 0;
+				}
+
+				this.addNewModel = function() {
+					_laserBeam = new THREEx.LaserBeam();
+					Bullet.QueueLaserBeam.push(_laserBeam);
+					//数组索引
+					_index = Bullet.QueueLaserBeam.length - 1;
+					THREEx.LaserCooked.baseURL = "./res/";
+					this.laserCooked = new THREEx.LaserCooked(Bullet.QueueLaserBeam[_index]);
+					//模型
+					_model = this.laserCooked.object3d;
+					this.hide();
+					Bullet.QueueLaserCooked.push(this.laserCooked);
+				}
+
+				this.attack = function(_pQ) {
+					this.patrolQueue = _pQ;
+					if (_counts < 1) {
+						this.iniRenderFn();
+						_counts = 1;
+					}
+					//__me.laserCooked.object3d.position.copy(new THREE.Vector3(1000, 100, 100));
+					//__me.laserCooked.object3d.rotation.y = Math.PI / 2;				
+				}
+
+				this.ini();
+
+				this.iniRenderFn = function() {
+					gOnRenderFcts.push((function(__me) {
+						return (function(delta, now) {
+							__me.laserCooked.update(delta, now)
+							var ___configs = __me.patrolQueue;
+							var ___attacker = Warcraft.GetSelfObjBySn(___configs.attackSn);
+							var ___target = Examination.GetSelfObjBySn(___configs.targetSn);
+
+							var startPos = ___attacker.getSelf().position;
+							var endPos = ___target.getSelf().position;
+
+							var dx = endPos.x - startPos.x;
+							var dz = endPos.z - startPos.z;
+							var d = Math.sqrt(dx * dx + dz * dz);
+
+							var targetVec = new THREE.Vector3(dx, 0, dz); //指向目标的方向向量
+
+							var rot = centerVec.angleTo(targetVec);
+
+							rot = dx > 0 ? rot : -rot; //修正旋转角度
+
+							__me.laserCooked.object3d.position.copy(___attacker.getSelf().position);
+							//__me.laserCooked.object3d.rotation.y = ___attacker.getSelf().rotation.y - Math.PI / 2;
+							__me.laserCooked.object3d.rotation.y = rot - Math.PI / 2;
+
+
+							if (___attacker.shooting) {
+								___attacker.getSelf().rotation.y = rot;
+								___attacker.getBullet().show();
+							}
+
+							//gRenderer.render(gScene, gCamera );
+						})
+
+					})(this))
+
+				}
+
+
+
+			};
+
+
+			//Bullet.MODEL = Bullet.MODEL || Bullet.LOADMODEL();
+			Bullet.QueueLaserBeam = [];
+			Bullet.QueueLaserCooked = [];
+			Bullet.QueueOnRenderFcts = [];
+
+
+			this.Bullet = Bullet;
+		})()
+
+		var __lastTimeMsec = null
+
+		requestAnimationFrame(
+			function animate(nowMsec) {
+				// keep looping
+				requestAnimationFrame(animate);
+				// measure time
+				__lastTimeMsec = __lastTimeMsec || nowMsec - 1000 / 60
+				var deltaMsec = Math.min(200, nowMsec - __lastTimeMsec)
+				__lastTimeMsec = nowMsec
+					// call each update function
+
+				gOnRenderFcts.forEach(
+					function(updateFn) {
+						updateFn(deltaMsec / 1000, nowMsec / 1000)
+					}
+				)
+			}
+		)
+
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		//attack
+		function attack(attacker, target, status, __attackerSn, __targetSn) {
+			//var attacker = teamsData[attackerNumber - 1];
+			//var defender = teamsData[defenderNumber - 1];
+
+			var time = 1800;
+
+			var quaternion = new THREE.Quaternion();
+			var rotation = new THREE.Euler();
+
+			var startPos = attacker.getSelf().position;
+			var endPos = target.getSelf().position;
+
+			var dx = endPos.x - startPos.x;
+			var dz = endPos.z - startPos.z;
+			var d = Math.sqrt(dx * dx + dz * dz);
+
+			var targetVec = new THREE.Vector3(dx, 0, dz); //指向目标的方向向量
+
+			var rot = centerVec.angleTo(targetVec);
+
+			rot = dx > 0 ? rot : -rot; //修正旋转角度
+
+			//旋转发射架 对准目标
+			var aim = new TWEEN.Tween(attacker.getSelf().rotation)
+				.to({
+					y: rot - Math.PI
+						// y: rot1+ attacker.getSelf().rotation.y
+				}, 0)
+				//.delay(500)
+				.onUpdate(function() {
+
+					attacker.getSelf().rotation.y = rot - Math.PI
+
+					//console.log(rot);
+				})
+				.onComplete(function() {
+					//					attacker.shooting = false;
+					//					startParticles(attacker, target, status, trajectory.curve, time);
+				})
+				.start();
+
+		}
+
+
+
+		//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		function initRenderer() {
+			gWidth = document.getElementById('three_canvas').clientWidth;
+			gHeight = document.getElementById('three_canvas').clientHeight;
+			gRenderer = new THREE.WebGLRenderer({
+				canvas: document.getElementById('three_canvas')
+			});
+			gRenderer.setPixelRatio(window.devicePixelRatio);
+			gRenderer.setSize(gWidth, gHeight);
+			gRenderer.setClearColor(0x000000, 0.25);
+		}
+
+		function initCamera() {
+			gCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 100000);
+			//gCamera.position.copy( new THREE.Vector3( 0, 3000, 5500 ));
+			gCamera.position.copy(new THREE.Vector3(0, 3500, 0));
+			gCamera.up.set(0, 1, 0);
+			gCamera.lookAt(new THREE.Vector3(0, -100, 0));
+
+		}
+
+		function cameraHandle() {
+			//			gCamera.position.z = 10
+			//			return
+
+			var flag = -1;
+			var timer = Date.now() * 0.00005;
+			gCamera.position.x = flag * Math.cos(timer) * 3500;
+			gCamera.position.y = 3500; //3500
+			gCamera.position.z = Math.sin(timer) * 3500;
+			gCamera.lookAt(new THREE.Vector3(0, -100, 0));
+		}
+
+
+		function initScene() {
+			gScene = new THREE.Scene();
+			window.scene = gScene;
+			//gLight
+			var ambientLight = new THREE.AmbientLight(0x606060);
+			gScene.add(ambientLight);
+
+			var directionalLight = new THREE.DirectionalLight(0xffffff);
+			directionalLight.position.set(-0.2, 0.5, 0.75).normalize();
+			gScene.add(directionalLight);
+
+		}
+
+		(function initUniverse() {
+
+			var size = 50000;
+
+			var r = "res/universe/";
+			var urls = [r + "px.jpg", r + "nx.jpg",
+				r + "py.jpg", r + "ny.jpg",
+				r + "pz.jpg", r + "nz.jpg"
+			];
+
+			var skyboxCubemap = new THREE.CubeTextureLoader(gLoadManager).load(urls);
+
+			skyboxCubemap.format = THREE.RGBFormat;
+			var skyboxShader = THREE.ShaderLib['cube'];
+			skyboxShader.uniforms['tCube'].value = skyboxCubemap;
+
+			gUniverse = new THREE.Mesh(
+				new THREE.BoxGeometry(size, size, size),
+				new THREE.ShaderMaterial({
+					fragmentShader: skyboxShader.fragmentShader,
+					vertexShader: skyboxShader.vertexShader,
+					uniforms: skyboxShader.uniforms,
+					depthWrite: false,
+					side: THREE.BackSide
+				})
+			);
+
+		})();
+
+		function initObject() {
+
+			gScene.add(gUniverse);
+
+			var counts = 0;
+			while (counts < WarcraftData.rows.length) {
+				//gWarcraft.push((new Warcraft()).setSn(WarcraftData.rows[counts].sn));
+				var obj = new Warcraft();
+				obj.setSn(WarcraftData.rows[counts].teamId);
+				gWarcraft.push(obj);
+				//obj.loadLogo(WarcraftData.rows[counts].logo);
+				++counts;
+			}
+
+			counts = 0;
+			while (counts < ExaminationData.rows.length) {
+				//gExamination.push((new Examination()).setSn(ExaminationData.rows[counts].id));
+				var obj = new Examination();
+				obj.setSn(ExaminationData.rows[counts].id);
+				obj.setName(ExaminationData.rows[counts].name);
+
+				gWarcraft.push(obj);
+				++counts;
+			}
+
+			try {
+				//				console.clear();
+			} catch (e) {
+				alert('Your browser don\'t support the Console command.');
+			}
+
+		}
+
+		function render(nowMsec) {
+			//Similar to setTimeout function, but better than it. :)
+			requestAnimationFrame(render);
+
+			var counts = Warcraft.Queue.length;
+			while (counts > 0) {
+				--counts
+				//if (counts % 2 == 0) {
+				//	Warcraft.Queue[counts].shooting = true;
+				//}
+				Warcraft.Queue[counts].whirl(-1, 2, 800);
+			}
+
+			var counts = Examination.Queue.length;
+			while (counts > 0) {
+				--counts
+				if (counts % 2 == 0) {
+					//obj.getSelf().position.y = -200
+					Examination.Queue[counts].whirl(1, 0, 1700);
+				} else {
+					//obj.getSelf().position.y = -200
+					Examination.Queue[counts].whirl(1, 0, 1900);
+				}
+			}
+
+			//AJAX刷新攻击
+			if (AttackData != null) {
+				var countsWarcraft = AttackData.rows.length;
+				while (countsWarcraft > 0) {
+					--countsWarcraft;
+					var __attacker = Warcraft.GetSelfObjBySn(AttackData.rows[countsWarcraft].teamId);
+					//调用攻击函数
+					//var __target = Examination.GetSelfObjBySn(AttackData.rows[countsWarcraft].id);
+					//var __status = AttackData.rows[countsWarcraft].solved;
+					//__attacker.shooting = true;
+
+					__attacker._patrolQueue.enqueue({
+						attackSn: AttackData.rows[countsWarcraft].teamId,
+						targetSn: AttackData.rows[countsWarcraft].id,
+						status: AttackData.rows[countsWarcraft].solved,
+						teamName: AttackData.rows[countsWarcraft].name,
+						score: AttackData.rows[countsWarcraft].score,
+						ranking: AttackData.rows[countsWarcraft].ranking,
+					});
+
+					//attack(__attacker, __target, __status, AttackData.rows[countsWarcraft].teamId, AttackData.rows[countsWarcraft].id);
+				}
+
+				AttackData = null;
+			}
+
+			//cancelAnimationFrame(~target);
+			cameraHandle();
+			TWEEN.update();
+
+			/*			gOnRenderFcts.forEach(
+							function(updateFn) {
+								updateFn()
+							}
+						)
+			*/
+			gRenderer.render(gScene, gCamera);
+
+		}
+
+		/*
+		//All of the callback function in the follwing callbacks:
+		//Warning: Must be defined before use
+		*/
+		gCallbacks = {
+			/*
+			initialization:
+			*/
+			onReady: function(event) {
+				if (gIsReady) {
+					gCallbacks.onLoad();
+				} else {
+					setTimeout(gCallbacks.onReady, 500);
+
+				}
+			},
+			//The program entrance :
+			onLoad: function(event) {
+				initRenderer();
+				initCamera();
+				initScene();
+				initObject();
+				render();
+			},
+			onWindowResize: function(event) {
+				//More working at here:
+				gCamera.aspect = window.innerWidth / window.innerHeight;
+				gCamera.updateProjectionMatrix();
+				gRenderer.setSize(window.innerWidth, window.innerHeight);
+				return false;
+			},
+			//You konw, disable choose words in any page contains Canvas or WebGL.
+			onDocumentSelectstart: function(event) {
+				return false;
+			}
+		}
+
+		gCallbacks.onReady();
+
+		//window.addEventListener('load', gCallbacks.onLoad, false);
+		window.addEventListener('resize', gCallbacks.onWindowResize, false);
+		document.addEventListener('selectstart', gCallbacks.onDocumentSelectstart, false);
+
+		var attackCounts = 0;
+		var AttackDataCache = AttackData;
+
+		function simulation() {
+			if (attackCounts == 0)
+				AttackData = AttackData1;
+			if (attackCounts == 1)
+				AttackData = AttackData2;
+			if (attackCounts == 3)
+				AttackData = AttackData;
+			++attackCounts;
+			if (attackCounts == 4) attackCounts = 0;
+			//console.log(attackCounts)
+			setTimeout(simulation, 500);
+		}
+
+		simulation()
+	}();
+	</script>
+</body>
+
+</html>
