@@ -2,7 +2,9 @@
 
 离线版，可在线预览： https://snipertulip.github.io/hctf_animation/
 
-Three Tween
+下载地址：https://github.com/snipertulip/hctf_animation/archive/v1.0.0.zip
+
+相关资源包：three.js, Tween, Queue, jQuery
 
 http://hctf.xctf.org.cn/
 
